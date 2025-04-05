@@ -158,6 +158,16 @@ map<int, string> theories = {
         "--> RT = WT (non-preemptive)"},
         
     {3,
+        "--> SJF Preemptive (SRTF):\n"
+        "--> Executes process with shortest remaining time\n"
+        "--> Preemptive version of SJF\n"
+        "--> Can cause context switches on new arrivals\n\n"
+        "Formulas:\n"
+        "--> WT = TAT - BT\n"
+        "--> RT = First Start - Arrival\n"
+        "--> TAT = CT - Arrival"},
+        
+    {4,
         "--> Priority (Preemptive):\n"
         "--> Executes highest priority process\n"
         "--> Implements priority aging\n"
@@ -167,7 +177,7 @@ map<int, string> theories = {
         "--> WT = TAT - BT\n"
         "--> RT = ST - AT"},
         
-    {4,
+    {5,
         "--> Priority (Non-Preemptive):\n"
         "--> Executes highest priority process\n"
         "--> No preemption\n"
@@ -176,7 +186,7 @@ map<int, string> theories = {
         "--> WT = CT - AT - BT\n"
         "--> RT = ST - AT"},
         
-    {5, 
+    {6, 
         "--> Round Robin (RR) Scheduling:\n"
         "--> Uses time quantum (2 units)\n"
         "--> Preemptive algorithm\n"
@@ -265,6 +275,78 @@ SchedulerResult SJFNonPreemptive(vector<Process> processes) {
 
     result.processes = processes;
     result.contextSwitches = processes.size() - 1;
+    return result;
+}
+
+SchedulerResult SJFPreemptive(vector<Process> processes) {
+    sort(processes.begin(), processes.end(), [](const Process& a, const Process& b) {
+        return a.arrival < b.arrival;
+    });
+
+    int currentTime = 0;
+    int completed = 0;
+    int n = processes.size();
+    vector<bool> done(n, false);
+    SchedulerResult result;
+    int lastPID = -1;
+    int currentIdx = -1;
+
+    while(completed < n) {
+        int idx = -1;
+        int shortestRemaining = INT_MAX;
+        
+        // Find process with shortest remaining time
+        for(int i = 0; i < n; i++) {
+            if(!done[i] && processes[i].arrival <= currentTime) {
+                if(processes[i].remaining < shortestRemaining || 
+                   (processes[i].remaining == shortestRemaining && 
+                    processes[i].arrival < processes[idx].arrival)) {
+                    shortestRemaining = processes[i].remaining;
+                    idx = i;
+                }
+            }
+        }
+
+        if(idx == -1) {
+            currentTime++;
+            continue;
+        }
+
+        // Track context switch
+        if(lastPID != -1 && lastPID != processes[idx].id) {
+            result.contextSwitches++;
+        }
+
+        // Update process execution
+        auto& p = processes[idx];
+        if(p.start == -1) {
+            p.start = currentTime;
+            p.response = p.start - p.arrival;
+        }
+
+        // Execute for 1 time unit
+        p.remaining--;
+        currentTime++;
+        lastPID = p.id;
+
+        // Update Gantt chart
+        if(!result.gantt.empty() && result.gantt.back().first == p.id) {
+            result.gantt.back().second.second = currentTime;
+        } else {
+            result.gantt.push_back({p.id, {currentTime - 1, currentTime}});
+        }
+
+        // Check if process completed
+        if(p.remaining == 0) {
+            done[idx] = true;
+            completed++;
+            p.completion = currentTime;
+            p.turnaround = p.completion - p.arrival;
+            p.waiting = p.turnaround - p.burst;
+        }
+    }
+
+    result.processes = processes;
     return result;
 }
 
@@ -435,14 +517,15 @@ int main() {
     while(true) {
         printHeader("CPU Scheduling Algorithms Simulator");
         cout << COLOR_MAGENTA 
-             << "\n  1. FCFS Scheduling       4. Priority Non-Preemptive\n"
-             << "  2. SJF Non-Preemptive    5. Round Robin\n"
-             << "  3. Priority Preemptive   6. Exit\n" << COLOR_RESET;
+             << "\n  1. FCFS Scheduling       5. Priority Non-Preemptive\n"
+             << "  2. SJF Non-Preemptive    6. Round Robin\n"
+             << "  3. SJF Preemptive        7. Exit\n"
+             << "  4. Priority Preemptive   \n" << COLOR_RESET;
         cout << COLOR_YELLOW << "\n  Enter your choice: ";
 
         int choice;
         cin >> choice;
-        if(choice == 6) break;
+        if(choice == 7) break;
 
         int n = 5 + rand() % 6; // 5-10 processes
         auto processes = generateProcesses(n);
@@ -460,18 +543,23 @@ int main() {
                 result = SJFNonPreemptive(processes);
                 break;
             case 3:
-                printHeader("Priority Preemptive");
+                printHeader("SJF Preemptive (SRTF)");
                 cout << COLOR_GREEN << "\n  Theory:\n" << theories[3] << COLOR_RESET << endl;
-                result = PriorityPreemptive(processes, true);
+                result = SJFPreemptive(processes);
                 break;
             case 4:
-                printHeader("Priority Non-Preemptive");
+                printHeader("Priority Preemptive");
                 cout << COLOR_GREEN << "\n  Theory:\n" << theories[4] << COLOR_RESET << endl;
-                result = PriorityPreemptive(processes, false);
+                result = PriorityPreemptive(processes, true);
                 break;
             case 5:
-                printHeader("Round Robin");
+                printHeader("Priority Non-Preemptive");
                 cout << COLOR_GREEN << "\n  Theory:\n" << theories[5] << COLOR_RESET << endl;
+                result = PriorityPreemptive(processes, false);
+                break;
+            case 6:
+                printHeader("Round Robin");
+                cout << COLOR_GREEN << "\n  Theory:\n" << theories[6] << COLOR_RESET << endl;
                 result = RoundRobin(processes);
                 break;
         }
@@ -493,9 +581,10 @@ int main() {
         displayTable(result.processes);
         printGanttChart(result.gantt, result.contextSwitches);
         
-        if(choice == 5) { // Show ready queue only for RR
+        if(choice == 5 || choice == 6) { // Show ready queue only for RR 
             printReadyQueueRR(result.readyQueueHistory);
         }
+
 
         cout << COLOR_CYAN << "\n  Average Waiting Time: " << result.avgWaiting
              << "\n  Average Turnaround Time: " << result.avgTurnaround
